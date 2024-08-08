@@ -88,7 +88,38 @@ for i, p in enumerate(PLANETS):
     p.append('au')
     p.append(i==3)
     try: p.append(TRUE_SIZES_KM[i])
-    except: continue
+    except: p.append(0.)
+    p.append(i)
+
+
+def calc_planet_magnitude(idx:int, earth_xyz:tuple, xyz:tuple):
+    if idx==0 or idx==3: return None
+    ec = np.array(earth_xyz, np.float32) / 1.495978707e11
+    pc = np.array(xyz, np.float32) / 1.495978707e11
+    p2e = ec - pc
+    d = np.sqrt((p2e**2).sum())
+    r = np.sqrt((pc**2).sum())
+    alpha = np.rad2deg(np.arccos(-(pc*p2e).sum()/d/r))
+    alpha_poly = np.float_power(alpha, np.arange(7))
+    first_term = 5. * np.log10(d*r)
+    coefs = np.zeros(7)
+    if idx==1:
+        coefs = np.array([-0.613, 6.3280E-02, -1.6336E-03, 3.3644E-05, -3.4265E-07, 1.6893E-09, -3.0334E-12])
+    elif idx==2 and alpha <= 163.7:
+        coefs = np.array([-4.384, -1.044E-03, 3.687E-04, -2.814E-06, 8.938E-09, 0., 0.])
+    elif idx==2:
+        coefs = np.array([236.05828, -2.81914E+00, 8.39034E-03, 0., 0., 0., 0.])
+    elif idx==4:
+        coefs = np.array([-1.601, 0.02267, -0.0001302, 0., 0., 0., 0.])
+    elif idx==5:
+        coefs = np.array([-9.395, -3.7E-04, 6.16E-04, 0., 0., 0., 0.])
+    elif idx==6:
+        coefs = np.array([-8.95, -3.7E-04, 6.16E-04, 0., 0., 0., 0.])
+    elif idx==7:
+        coefs = np.array([-7.110, 6.587E-3, 1.045E-4, 0., 0., 0., 0.])
+    elif idx==8:
+        coefs = np.array([-7.00, 7.944E-3, 9.617E-5, 0., 0., 0., 0.])
+    return first_term + (coefs * alpha_poly).sum()
 
 
 LATLONG = (37.5, 127.0)
@@ -121,7 +152,7 @@ class sky_obj(object):
 
 class planet(sky_obj):
     earth = None
-    def __init__(self, e, a, inc, asc, peri, M0, r:float, fill, unit="au", earth=False, true_r_km:float=0.) -> None:
+    def __init__(self, e, a, inc, asc, peri, M0, r:float, fill, unit="au", earth=False, true_r_km:float=0., idx:int=0) -> None:
         self.true_r_km = true_r_km
         self.r, self.fill = r, fill
         self.is_sun = False
@@ -137,6 +168,7 @@ class planet(sky_obj):
         self.x, self.y, self.z = self.get_space_coord(NOWUTC)
         self.space_coord = (self.x, self.y, self.z)
         if earth: planet.earth = self
+        self.idx = idx
     def get_space_coord(self, tt:datetime):
         tp = tt - datetime(2000, 1, 1, 12, 0, 0, tzinfo=UTC)
         M = 2 * np.pi * (tp.total_seconds() / self.period + self.M0 / 360)
@@ -173,8 +205,8 @@ class planet(sky_obj):
         return ((ec-sc)**2).sum()
     def draw(self, drw: ImageDraw.ImageDraw) -> None:
         if self is not planet.earth and self.true_r_km > 0:
-            RSCALE = 100.
-            self.r = self.true_r_km * 1000 / np.sqrt(self.earth_sqdist) * CANV_R * RSCALE
+            self.r = 0.5 + (4 - calc_planet_magnitude(self.idx, planet.earth.space_coord, self.space_coord)) / 2
+            if self.r < 0: self.r = 0.
         super().draw(drw)
         if self.proj_coord:
             x, y = self.proj_coord
@@ -215,7 +247,7 @@ class planet_orbit(object):
                 self.xy.append((x * C2SCALE + C2X, -y * C2SCALE + C2Y))
     def draw(self, draw:ImageDraw.ImageDraw):
         draw.polygon(self.xy, outline=self.fill, width=self.thick)
-    
+
 def space_to_proj(space):
     x, y, z = space
     long = np.arctan2(y, x)
@@ -242,7 +274,7 @@ def sky_to_proj(sky):
     long, lat = sky
     r = (np.pi/2 - lat) * EQ_R * 2 / np.pi
     return (W/2 + r * np.cos(long), H/2 + r * np.sin(long))
-    
+
 class approx_moon(object):
     '''
     approximately circular orbit because i don't want to deal with this
@@ -276,7 +308,7 @@ class approx_moon(object):
         px, py = self.proj_coord
         draw.ellipse((px-r, py-r, px+r, py+r), self.fill)
         draw.ellipse((px-er, py-er, px+er, py+er), BG_COLOR)
-    
+
 class great_circle(object):
     '''
     center: in sky coord (radians, longlat)
@@ -564,7 +596,7 @@ class skywindow(object):
                             W/2 - (CANV_R-7)*np.cos(hand_dir), H/2 - (CANV_R-7)*np.sin(hand_dir))
         other_xy = (W/2 - (EQ_R*2-CANV_R)*np.cos(hand_dir), H/2 - (EQ_R*2-CANV_R)*np.sin(hand_dir),
                     W/2 + CANV_R*np.cos(hand_dir), H/2 + CANV_R*np.sin(hand_dir))
-        
+
         sunhand_xy = (W/2, H/2, W/2 + (H/2-5)*np.cos(suntheta), H/2 + (H/2-5)*np.sin(suntheta))
 
         moon = approx_moon(FAINTWHITE)
